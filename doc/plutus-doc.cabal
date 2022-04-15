@@ -52,6 +52,7 @@ executable doc-doctests
       BasicValidators
       BasicPolicies
       BasicApps
+      BasicAppConstraints
       GameModel
       HandlingBlockchainEvents
       HelloWorldApp

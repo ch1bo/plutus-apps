@@ -1,0 +1,220 @@
+= `plutus-ledger-constraints` design
+
+== Introduction
+
+This document describes the design of the `plutus-ledger-constraints` library.
+More specially, it describes
+
+* how the constraint-based API is used to generate Plutus scripts and transactions.
+* the rational behind the selected approach
+* possible alternative approaches
+
+== Specification
+
+We define the constraints with the following data types.
+
+[source,haskell]
+----
+data TxConstraints i o =
+    TxConstraints
+        { txConstraints :: [TxConstraint]
+        , txOwnInputs   :: [ScriptInputConstraint i]
+        , txOwnOutputs  :: [ScriptOutputConstraint o]
+        }
+
+data TxConstraint =
+      MustHashDatum DatumHash Datum
+    -- ^ The transaction's datum witnesses must contain the given 'DatumHash'
+    -- and 'Datum'. Useful when you already have a 'DatumHash' and
+    -- want to make sure that it is the actual hash of the 'Datum'.
+    | MustIncludeDatum Datum
+    -- ^ Like 'MustHashDatum', but the hash of the 'Datum' is computed automatically.
+    | MustValidateIn POSIXTimeRange
+    -- ^ The transaction's validity range must be set with the given 'POSIXTimeRange'.
+    | MustBeSignedBy PaymentPubKeyHash
+    -- ^ The transaction must add the given 'PaymentPubKeyHash' in its signatories.
+    | MustSpendAtLeast Value
+    -- ^ The sum of the transaction's input 'Value's must be at least as much as
+    -- the given 'Value'.
+    | MustProduceAtLeast Value
+    -- ^ The sum of the transaction's output 'Value's must be at least as much as
+    -- the given 'Value'.
+    | MustSpendPubKeyOutput TxOutRef
+    -- ^ The transaction must spend the given unspent transaction public key output.
+    | MustSpendScriptOutput TxOutRef Redeemer
+    -- ^ The transaction must spend the given unspent transaction script output.
+    | MustMintValue MintingPolicyHash Redeemer TokenName Integer
+    -- ^ The transaction must mint the given token and amount.
+    | MustPayToPubKeyAddress PaymentPubKeyHash (Maybe StakePubKeyHash) (Maybe Datum) Value
+    -- ^ The transaction must create a transaction output with a public key address.
+    | MustPayToOtherScript ValidatorHash Datum Value
+    -- ^ The transaction must create a transaction output with a script address.
+    | MustSatisfyAnyOf [[TxConstraint]]
+
+data ScriptInputConstraint a =
+    ScriptInputConstraint
+        { icRedeemer :: a -- ^ The typed 'Redeemer' to be used with the target script
+        , icTxOutRef :: TxOutRef -- ^ The UTXO to be spent by the target script
+        }
+
+data ScriptOutputConstraint a =
+    ScriptOutputConstraint
+        { ocDatum :: a -- ^ Typed datum to be used with the target script
+        , ocValue :: Value
+        }
+----
+
+The `TxConstraints` can be combined with its `Semigroup` instance.
+Values of `TxConstraints` are constructed using smart constructors like `mustBeSignedBy`, `mustPayToTheScript`, `mustSpendAtLeast`, etc. which are available in link:src/Ledger/Constraints/TxConstraints.hs[]
+
+Here's an example for constructing constraints.
+
+TESTTESTSETSETSET
+
+[source,haskell]
+----
+include::../doc/plutus/tutorials/BasicAppConstraints.hs[tags=BLOCK1]
+----
+
+[source,haskell]
+----
+{-# INLINABLE myConstraints #-}
+myConstraints :: PaymentPubKeyHash -> TxOutRef -> TxConstraints i o
+myConstraints pkh ref = mustBeSignedBy pkh <> mustSpendPubKeyOutput ref
+----
+
+These constructed constraints can be used both to generate a transaction that satifies them using `mkTx` and to check wheter a given pending transaction meets the constrains using `checkScriptContext` which generates a Plutus validation function.
+Here's an example.
+
+[source,haskell]
+----
+{-# INLINABLE validate #-}
+myValidator :: PaymentPubKeyHash -> TxOutRef -> () -> () -> ScriptContext -> Bool
+myValidator pkh ref _ _ sc =
+  checkScriptContext (myConstraints pkh ref) sc
+
+mkMyTx :: PaymentPubKeyHash -> (TxOutRef, ChainIndexTxOut) -> Either MkTxError UnbalancedTx
+mkMyTx pkh (ref, txOut) =
+  let lookups = unspentOutputs (Map.singleton ref txOut)
+   in mkTx lookups (myConstraints pkh ref)
+----
+
+== Rationale
+
+In order to write and interact with Plutus script on the Cardano blockchain, one needs to:
+
+* write a Plutus script which validates certain actions (like spending a transaction script output or minting a currency)
+* create and submit transactions which create or spend a transaction output with the script's address.
+
+Plutus scripts are written using Haskell, but there are multiple options for creating transactions.
+The most notable option is to use the `cardano-cli` component of `cardano-node` to create, balance, sign and submit transactions.
+`cardano-cli` provides a low-level way to create transactions in any era (Byron, Shelley, Alonzo, etc.).
+
+However, `cardano-cli` is not a user-friendly way of creating transactions, especially when using the `cardano-api` Haskell library.
+Also, the user has the burden of making sure that the created transaction is in sync with the related Plutus script.
+
+Thus, we propose a high-level library to create transactions using a constraint-based API, which generates both a Plutus script and a transaction given a set of constraints.
+
+=== Requirements
+
+We have a number of requirements that we need to fulfil.
+
+* users should be able to describe transactions using predefined constraints.
+* transaction creation should be limited to the latest Cardano era.
+* constraints should be able to generate a Plutus script as well as an unbalanced transaction
+
+=== Argument
+
+The definition of the constraints contain at least the information required by Plutus scripts.
+The arguments behind this design choice are that:
+* less information is needed to validate the spending of a transaction output, than to build a transaction.
+* not all datatypes are permitted to be used in Plutus scripts (only builtin functions and data types from `plutus-tx` can be used)
+* the more data we include in Plutus scripts, the higher the execution cost. TODO: Is this true? Or is this only true if we *actually* use this additionnal data in the validation code?
+
+For example, one data constructor of `TxConstraint` is `MustSpendAtLeast Value`.
+When generating validation code, this constraint returns `True` when the sum of the input `Value`s are greater than the provided `Value`.
+However, when using this constraint to generate a transaction, we need to know who pays (`PaymentPubKeyHash`) for the missing value, if any.
+Thus, this `PaymentPubKeyHash` needs to be provided through another mean (in our case, through a lookups value).
+
+=== Limitations
+
+There is one major drawback to this approach: the lookups value in transaction creation.
+You need to provide the required lookups that are needed by the constraints.
+The problem is that there is nothing linking a specific constraint to a specific lookup.
+More spefically, there is nothing in the API (apart from reading the documentation) which prevents the users from providing an unrequired lookup, or forgetting to provide a required lookup.
+The result is a runtime error, and not a compile error.
+
+For example, there is nothing preventing the user from doing the following.
+
+[source,haskell]
+----
+mkMyTx1 :: PaymentPubKeyHash -> TxOutRef -> Either MkTxError UnbalancedTx
+mkMyTx1 pkh ref =
+  let lookups = mempty -- Missing lookup for the transaction output reference
+   in mkTx lookups (mustSpendPubKeyOutput ref)
+
+mkMyTx2 :: PaymentPubKeyHash -> TxOutRef -> Either MkTxError UnbalancedTx
+mkMyTx2 pkh ref =
+  let lookups = ownPaymentPubKeyHash pkh -- Unnecessary lookup
+   in mkTx lookups (mustSpendPubKeyOutput ref)
+----
+
+Both of these functions will return a `Left` value.
+
+=== Alternatives
+
+==== Integrating lookups in the constraints
+
+The data constructors of `TxConstraint` could contain all the needed information for both the Plutus script and the transaction creation.
+
+For example, we could replace `TxConstraint` with:
+
+[source,haskell]
+----
+data TxConstraint =
+    MustBeSignedBy PaymentPubKeyHash (Maybe PaymentPubKey)
+    MustSpentPubKeyOutput TxOutRef ChainIndexTxOut
+    MustSpendAtLeast PaymentPubKeyHash Value
+    -- ... (OTHER CONSTRAINTS)
+----
+
+On the upside:
+
+* the lookups are integrated in the constraints itself for the transaction creation.
+
+On the downside:
+
+* some of these additionnal types cannot be used in Plutus scripts such as `ChainIndexTxOut`.
+* some of these additionnal types might increase cost of Plutus scripts. TODO: to validate
+* the users has the burden of handling runtime errors such as not finding the `ChainIndexTxOut` of a `TxOutRef` from an external source.
+
+==== Distinct isomorphic constraints
+
+Instead of a single `TxConstraint` which is used for both Plutus scripts and creating transactions, we can create two distinct and isomorphic datatypes. TODO: Not sure if isomorphic is the right word here.
+
+For example, we could replace `TxConstraint` with:
+
+[source,haskell]
+----
+data ValidationTxConstraint =
+    MustBeSignedBy PaymentPubKeyHash
+    MustSpentPubKeyOutput TxOutRef
+    MustSpendAtLeast Value
+    -- ... (OTHER CONSTRAINTS)
+
+data MkTxConstraint =
+    MustBeSignedBy PaymentPubKeyHash (Maybe PaymentPubKey)
+    MustSpentPubKeyOutput TxOutRef ChainIndexTxOut
+    MustSpendAtLeast PaymentPubKeyHash Value
+    -- ... (OTHER CONSTRAINTS)
+----
+
+On the upside:
+
+* the lookups are integrated in the constraints itself for the transaction creation.
+* we only include the minimum amount of required information in the Plutus script
+
+On the downside:
+
+* the user has the burden of maintining a correspondance between Plutus scripts constraints and transaction creation constraints.
+* the users has the burden of handling runtime errors such as not finding the `ChainIndexTxOut` of a `TxOutRef` from an external source.
