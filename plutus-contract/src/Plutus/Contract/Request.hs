@@ -140,7 +140,7 @@ import Wallet.Types (ContractInstanceId, EndpointDescription (EndpointDescriptio
 import Plutus.ChainIndex (ChainIndexTx, Page (nextPageQuery, pageItems), PageQuery, txOutRefs)
 import Plutus.ChainIndex.Api (IsUtxoResponse, TxosResponse, UtxosResponse (page), paget)
 import Plutus.ChainIndex.Types (RollbackState (Unknown), Tip, TxOutStatus, TxStatus)
-import Plutus.Contract.Error (AsContractError (_ChainIndexContractError, _ConstraintResolutionContractError, _EndpointDecodeContractError, _ResumableContractError, _WalletContractError))
+import Plutus.Contract.Error (AsContractError (_ChainIndexContractError, _ConstraintResolutionContractError, _EndpointDecodeContractError, _ResumableContractError, _TxToCardanoConvertContractError, _WalletContractError))
 import Plutus.Contract.Resumable (prompt)
 import Plutus.Contract.Types (Contract (Contract), MatchingError (WrongVariantError), Promise (Promise), mapError,
                               runError, throwError)
@@ -178,7 +178,9 @@ adjustUnbalancedTx ::
     )
     => UnbalancedTx
     -> Contract w s e UnbalancedTx
-adjustUnbalancedTx utx = pabReq (AdjustUnbalancedTxReq utx) E._AdjustUnbalancedTxResp
+adjustUnbalancedTx utx =
+  let req = pabReq (AdjustUnbalancedTxReq utx) E._AdjustUnbalancedTxResp in
+  req >>= either (throwError . review _TxToCardanoConvertContractError) pure
 
 -- | Wait until the slot
 awaitSlot ::

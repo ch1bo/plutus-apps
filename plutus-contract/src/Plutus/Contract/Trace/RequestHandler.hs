@@ -51,7 +51,7 @@ import Control.Monad.Freer.Extras.Log (LogMessage, LogMsg, LogObserve, logDebug,
 import Ledger (POSIXTime, POSIXTimeRange, PaymentPubKeyHash, Slot, SlotRange)
 import Ledger.Constraints.OffChain (UnbalancedTx, adjustUnbalancedTx)
 import Ledger.TimeSlot qualified as TimeSlot
-import Ledger.Tx (CardanoTx)
+import Ledger.Tx (CardanoTx, ToCardanoError)
 import Plutus.ChainIndex (ChainIndexQueryEffect)
 import Plutus.ChainIndex.Effects qualified as ChainIndexEff
 import Plutus.Contract.Effects (ChainIndexQuery (..), ChainIndexResponse (..))
@@ -263,7 +263,7 @@ handleAdjustUnbalancedTx ::
     ( Member (LogObserve (LogMessage Text)) effs
     )
     => ProtocolParameters
-    -> RequestHandler effs UnbalancedTx UnbalancedTx
+    -> RequestHandler effs UnbalancedTx (Either ToCardanoError UnbalancedTx)
 handleAdjustUnbalancedTx pparams =
     RequestHandler $ \utx ->
         surroundDebug @Text "handleAdjustUnbalancedTx" $ pure $ adjustUnbalancedTx pparams utx

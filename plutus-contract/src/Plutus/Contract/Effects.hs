@@ -105,6 +105,7 @@ import Plutus.ChainIndex.Api (IsUtxoResponse (IsUtxoResponse), TxosResponse (Txo
                               UtxosResponse (UtxosResponse))
 import Plutus.ChainIndex.Tx (ChainIndexTx (_citxTxId))
 import Plutus.ChainIndex.Types (Tip, TxOutStatus, TxStatus)
+import Plutus.Contract.CardanoAPI (ToCardanoError)
 import Prettyprinter (Pretty (pretty), hsep, indent, viaShow, vsep, (<+>))
 import Wallet.API (WalletAPIError)
 import Wallet.Types (ContractInstanceId, EndpointDescription, EndpointValue)
@@ -153,7 +154,7 @@ instance Pretty PABReq where
 
 -- | Responses that 'Contract's receive
 data PABResp =
-    AdjustUnbalancedTxResp UnbalancedTx
+    AdjustUnbalancedTxResp (Either ToCardanoError UnbalancedTx)
     | AwaitSlotResp Slot
     | AwaitTimeResp POSIXTime
     | AwaitUtxoSpentResp ChainIndexTx

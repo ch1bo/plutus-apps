@@ -47,7 +47,7 @@ module Ledger.Constraints.OffChain(
     , missingValueSpent
     ) where
 
-import Control.Lens (At (at), iforM_, makeLensesFor, over, use, view, (%=), (.=), (<>=))
+import Control.Lens (At (at), iforM_, makeLensesFor, mapMOf, use, view, (%=), (.=), (<>=))
 import Control.Monad (forM_)
 import Control.Monad.Except (MonadError (catchError, throwError), runExcept, unless)
 import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT), asks)
@@ -56,6 +56,7 @@ import Control.Monad.State (MonadState (get, put), execStateT, gets)
 import Cardano.Api.Shelley (ProtocolParameters)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Foldable (traverse_)
+import Data.Functor ((<&>))
 import Data.List (elemIndex)
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -78,8 +79,8 @@ import Ledger.Constraints.TxConstraints (ScriptInputConstraint (ScriptInputConst
                                          TxConstraintFun (MustSpendScriptOutputWithMatchingDatumAndValue),
                                          TxConstraintFuns (TxConstraintFuns),
                                          TxConstraints (TxConstraints, txConstraintFuns, txConstraints, txOwnInputs, txOwnOutputs))
+
 import Ledger.Crypto (pubKeyHash)
-import Ledger.Index (minAdaTxOut)
 import Ledger.Orphans ()
 import Ledger.Scripts (Datum (Datum), DatumHash, MintingPolicy, MintingPolicyHash, Redeemer, Validator, ValidatorHash,
                        datumHash, mintingPolicyHash, validatorHash)
@@ -398,14 +399,14 @@ mkTx lookups txc = mkSomeTx [SomeLookupsAndConstraints lookups txc]
 
 -- | Each transaction output should contain a minimum amount of Ada (this is a
 -- restriction on the real Cardano network).
-adjustUnbalancedTx :: ProtocolParameters -> UnbalancedTx -> UnbalancedTx
-adjustUnbalancedTx pparams = over (tx . Tx.outputs . traverse) adjustTxOut
+adjustUnbalancedTx :: ProtocolParameters -> UnbalancedTx -> Either Tx.ToCardanoError UnbalancedTx
+adjustUnbalancedTx pparams = mapMOf (tx . Tx.outputs . traverse) adjustTxOut
   where
-    adjustTxOut :: TxOut -> TxOut
-    adjustTxOut txOut =
-      let minAdaTxOut' = either (const minAdaTxOut) (Ada.fromValue . evaluateMinLovelaceOutput pparams) $ fromPlutusTxOut' txOut in
-      let missingLovelace = max 0 (minAdaTxOut' - Ada.fromValue (txOutValue txOut))
-       in txOut { txOutValue = txOutValue txOut <> Ada.toValue missingLovelace }
+    adjustTxOut :: TxOut -> Either Tx.ToCardanoError TxOut
+    adjustTxOut txOut = fromPlutusTxOut' txOut <&> \txOut' ->
+        let minAdaTxOut' = Ada.fromValue $ evaluateMinLovelaceOutput pparams txOut'
+            missingLovelace = max 0 (minAdaTxOut' - Ada.fromValue (txOutValue txOut))
+        in txOut { txOutValue = txOutValue txOut <> Ada.toValue missingLovelace }
 
 -- | Add the remaining balance of the total value that the tx must spend.
 --   See note [Balance of value spent]

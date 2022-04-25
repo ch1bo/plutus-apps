@@ -115,8 +115,7 @@ getUnspentOutput = do
     ownPkh <- Contract.ownPaymentPubKeyHash
     let constraints = mustPayToPubKey ownPkh (Ada.lovelaceValueOf 1)
     utx <- either (throwing _ConstraintResolutionContractError) pure (mkTx @Void mempty constraints)
-    adjusted <- Contract.adjustUnbalancedTx utx
-    tx <- Contract.balanceTx adjusted
+    tx <- Contract.adjustUnbalancedTx utx >>= Contract.balanceTx
     case Set.lookupMin (getCardanoTxInputs tx) of
         Just inp -> pure $ txInRef inp
         Nothing  -> throwing _OtherContractError "Balanced transaction has no inputs"

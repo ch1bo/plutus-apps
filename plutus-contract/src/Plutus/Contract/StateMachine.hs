@@ -80,10 +80,10 @@ import Ledger.Typed.Tx (TypedScriptTxOut (TypedScriptTxOut, tyTxOutData, tyTxOut
 import Ledger.Typed.Tx qualified as Typed
 import Ledger.Value qualified as Value
 import Plutus.ChainIndex (ChainIndexTx (_citxInputs))
-import Plutus.Contract (AsContractError (_ConstraintResolutionContractError, _ContractError), Contract, ContractError,
-                        Promise, adjustUnbalancedTx, awaitPromise, isSlot, isTime, logWarn, mapError, never,
-                        ownPaymentPubKeyHash, promiseBind, select, submitTxConfirmed, utxoIsProduced, utxoIsSpent,
-                        utxosAt, utxosTxOutTxFromTx)
+import Plutus.Contract (AsContractError (_ConstraintResolutionContractError, _ContractError, _TxToCardanoConvertContractError),
+                        Contract, ContractError, Promise, adjustUnbalancedTx, awaitPromise, isSlot, isTime, logWarn,
+                        mapError, never, ownPaymentPubKeyHash, promiseBind, select, submitTxConfirmed, utxoIsProduced,
+                        utxoIsSpent, utxosAt, utxosTxOutTxFromTx)
 import Plutus.Contract.Request (mkTxContract)
 import Plutus.Contract.StateMachine.MintingPolarity (MintingPolarity (Burn, Mint))
 import Plutus.Contract.StateMachine.OnChain (State (State, stateData, stateValue),
